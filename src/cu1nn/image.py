@@ -6,15 +6,14 @@ from cupyx.scipy.sparse.csgraph import connected_components
 
 
 preamble = r"""
-#define SWAPMIN(values, idx, min_value, min_index) \
-    if (values[idx] < min_value) { \
+#define SWAPMIN(values, mask, idx, min_value, min_index) \
+    if (mask[idx] && values[idx] < min_value) { \
         min_value = values[idx]; \
         min_index = idx; \
     }
 
 #define IDX(z, y, x, height, width) (z * height * width + y * width + x)
 """
-
 
 
 _3d_image_1nn = cp.ElementwiseKernel(
@@ -37,39 +36,39 @@ _3d_image_1nn = cp.ElementwiseKernel(
 
         if (nz < depth) {
             nidx = IDX(nz, ny, nx, height, width);
-            SWAPMIN(image, nidx, min_value, min_index);
+            SWAPMIN(image, mask, nidx, min_value, min_index);
         }
 
         nz = z - 1;
         if (nz >= 0) {
             nidx = IDX(nz, ny, nx, height, width);
-            SWAPMIN(image, nidx, min_value, min_index);
+            SWAPMIN(image, mask, nidx, min_value, min_index);
         }
 
         nz = z;
         ny = y + 1;
         if (ny < height) {
             nidx = IDX(nz, ny, nx, height, width);
-            SWAPMIN(image, nidx, min_value, min_index);
+            SWAPMIN(image, mask, nidx, min_value, min_index);
         }
 
         ny = y - 1;
         if (ny >= 0) {
             nidx = IDX(nz, ny, nx, height, width);
-            SWAPMIN(image, nidx, min_value, min_index);
+            SWAPMIN(image, mask, nidx, min_value, min_index);
         }
 
         ny = y;
         nx = x + 1;
         if (nx < width) {
             nidx = IDX(nz, ny, nx, height, width);
-            SWAPMIN(image, nidx, min_value, min_index);
+            SWAPMIN(image, mask, nidx, min_value, min_index);
         }
 
         nx = x - 1;
         if (nx >= 0) {
             nidx = IDX(nz, ny, nx, height, width);
-            SWAPMIN(image, nidx, min_value, min_index);
+            SWAPMIN(image, mask, nidx, min_value, min_index);
         }
 
         indices[i] = min_index;
