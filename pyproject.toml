@@ -1,0 +1,20 @@
+[project]
+name = "cu1nn"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Jordao Bragantini", email = "jordao.bragantini@czbiohub.org" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "cupy>=13.6.0",
+    "cupy-cuda12x>=13.6.0",  # just to avoid compilation
+]
+
+[project.scripts]
+cu1nn = "cu1nn:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
