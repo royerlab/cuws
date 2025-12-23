@@ -7,7 +7,10 @@ from cupyx.scipy.sparse.csgraph import connected_components
 
 preamble = r"""
 #define SWAPMIN(values, mask, idx, min_value, min_index) \
-    if (mask[idx] && values[idx] < min_value) { \
+    if (mask[idx] && \
+        (values[idx] < min_value || \
+         (values[idx] == min_value && idx < min_index))) \
+    { \
         min_value = values[idx]; \
         min_index = idx; \
     }
