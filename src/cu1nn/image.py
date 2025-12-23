@@ -85,6 +85,15 @@ _3d_image_1nn = cp.ElementwiseKernel(
     "_3d_image_1nn",
 )
 
+_group_by = cp.ElementwiseKernel(
+    "raw int32 labels, raw float32 values",
+    "raw float32 min_values",
+    """
+    atomicMin(&min_values[labels[i]], values[i]);
+    """,
+    "_group_by",
+)
+
 
 def watershed_from_minima(
     image: cp.ndarray,
@@ -112,7 +121,10 @@ def watershed_from_minima(
 
     sparse_image = csp.csr_matrix((data, indices, indptr), shape=(size, size))
 
-    _, cc = connected_components(sparse_image, directed=True, connection='weak', return_labels=True)
+    n_cc, cc = connected_components(sparse_image, directed=True, connection='weak', return_labels=True)
+
+    cc_min_values = cp.full(n_cc, np.inf, dtype=cp.float32)
+    _group_by(cc, data, cc_min_values, size=size)
 
     cc = cp.where(flat_mask, cc + 1, 0)
     # TODO: use connected_components lower level API, to take of masking and relabel and +1 ourselves
