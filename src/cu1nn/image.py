@@ -5,10 +5,22 @@ import cupyx.scipy.sparse as csp
 from cupyx.scipy.sparse.csgraph import connected_components
 
 
+preamble = r"""
+#define SWAPMIN(values, idx, min_value, min_index) \
+    if (values[idx] < min_value) { \
+        min_value = values[idx]; \
+        min_index = idx; \
+    }
+
+#define IDX(z, y, x, height, width) (z * height * width + y * width + x)
+"""
+
+
+
 _3d_image_1nn = cp.ElementwiseKernel(
-    "raw T image, raw bool mask, int64 depth, int64 height, int64 width",
-    "raw float32 data, raw int64 indices",
-    """
+    r"raw T image, raw bool mask, int64 depth, int64 height, int64 width",
+    r"raw float32 data, raw int64 indices",
+    r"""
     if (mask[i])
     {
         long long z = i / (height * width);
@@ -24,65 +36,48 @@ _3d_image_1nn = cp.ElementwiseKernel(
         nx = x;
 
         if (nz < depth) {
-            nidx = nz * height * width + ny * width + nx;
-            if (image[nidx] < min_value) {
-                min_value = image[nidx];
-                min_index = nidx;
-            }
+            nidx = IDX(nz, ny, nx, height, width);
+            SWAPMIN(image, nidx, min_value, min_index);
         }
 
         nz = z - 1;
         if (nz >= 0) {
-            nidx = nz * height * width + ny * width + nx;
-            if (image[nidx] < min_value) {
-                min_value = image[nidx];
-                min_index = nidx;
-            }
+            nidx = IDX(nz, ny, nx, height, width);
+            SWAPMIN(image, nidx, min_value, min_index);
         }
 
         nz = z;
         ny = y + 1;
         if (ny < height) {
-            nidx = nz * height * width + ny * width + nx;
-            if (image[nidx] < min_value) {
-                min_value = image[nidx];
-                min_index = nidx;
-            }
+            nidx = IDX(nz, ny, nx, height, width);
+            SWAPMIN(image, nidx, min_value, min_index);
         }
 
         ny = y - 1;
         if (ny >= 0) {
-            nidx = nz * height * width + ny * width + nx;
-            if (image[nidx] < min_value) {
-                min_value = image[nidx];
-                min_index = nidx;
-            }
+            nidx = IDX(nz, ny, nx, height, width);
+            SWAPMIN(image, nidx, min_value, min_index);
         }
 
         ny = y;
         nx = x + 1;
         if (nx < width) {
-            nidx = nz * height * width + ny * width + nx;
-            if (image[nidx] < min_value) {
-                min_value = image[nidx];
-                min_index = nidx;
-            }
+            nidx = IDX(nz, ny, nx, height, width);
+            SWAPMIN(image, nidx, min_value, min_index);
         }
 
         nx = x - 1;
         if (nx >= 0) {
-            nidx = nz * height * width + ny * width + nx;
-            if (image[nidx] < min_value) {
-                min_value = image[nidx];
-                min_index = nidx;
-            }
+            nidx = IDX(nz, ny, nx, height, width);
+            SWAPMIN(image, nidx, min_value, min_index);
         }
 
         indices[i] = min_index;
         data[i] = min_value + 1e-8f; // avoiding zeros
     }
     """,
-    "_3d_image_1nn",
+    r"_3d_image_1nn",
+    preamble=preamble,
 )
 
 _group_by = cp.ElementwiseKernel(
