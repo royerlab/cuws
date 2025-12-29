@@ -6,18 +6,9 @@ from cupyx.scipy.sparse.csgraph import connected_components
 
 
 preamble = r"""
-#define SWAPMIN(values, mask, idx, min_value, min_index) \
-{ \
-    if (mask[idx] && \
-        (values[idx] < min_value || \
-         (values[idx] == min_value && idx < min_index))) \
-    { \
-        min_value = values[idx]; \
-        min_index = idx; \
-    } \
-}
-
 #define IDX(z, y, x, height, width) (z * height * width + y * width + x)
+
+typedef long long ll;
 
 #define SWAPROOT(roots, values, ri_value, r, i, nidx) \
 { \
@@ -42,53 +33,35 @@ _3d_image_1nn = cp.ElementwiseKernel(
     r"""
     if (mask[i])
     {
-        long long z = i / (height * width);
-        long long y = (i % (height * width)) / width;
-        long long x = i % width;
+        ll z = i / (height * width);
+        ll y = (i % (height * width)) / width;
+        ll x = i % width;
 
-        long long nz, ny, nx, nidx;
+        ll nz, ny, nx, nidx;
         T min_value = image[i];
-        long long min_index = i;
+        ll min_index = i;
 
-        nz = z + 1;
-        ny = y;
-        nx = x;
+        const ll dz[] = {1, -1, 0, 0, 0, 0};
+        const ll dy[] = {0, 0, 1, -1, 0, 0};
+        const ll dx[] = {0, 0, 0, 0, 1, -1};
 
-        if (nz < depth) {
-            nidx = IDX(nz, ny, nx, height, width);
-            SWAPMIN(image, mask, nidx, min_value, min_index);
-        }
+        #pragma unroll
+        for (int i = 0; i < 6; ++i)
+        {
+            ll nz = z + dz[i];
+            ll ny = y + dy[i];
+            ll nx = x + dx[i];
 
-        nz = z - 1;
-        if (nz >= 0) {
-            nidx = IDX(nz, ny, nx, height, width);
-            SWAPMIN(image, mask, nidx, min_value, min_index);
-        }
-
-        nz = z;
-        ny = y + 1;
-        if (ny < height) {
-            nidx = IDX(nz, ny, nx, height, width);
-            SWAPMIN(image, mask, nidx, min_value, min_index);
-        }
-
-        ny = y - 1;
-        if (ny >= 0) {
-            nidx = IDX(nz, ny, nx, height, width);
-            SWAPMIN(image, mask, nidx, min_value, min_index);
-        }
-
-        ny = y;
-        nx = x + 1;
-        if (nx < width) {
-            nidx = IDX(nz, ny, nx, height, width);
-            SWAPMIN(image, mask, nidx, min_value, min_index);
-        }
-
-        nx = x - 1;
-        if (nx >= 0) {
-            nidx = IDX(nz, ny, nx, height, width);
-            SWAPMIN(image, mask, nidx, min_value, min_index);
+            if (nz >= 0 && nz < depth && ny >= 0 && ny < height && nx >= 0 && nx < width)
+            {
+                ll nidx = IDX(nz, ny, nx, height, width);
+                if (mask[nidx] && (image[nidx] < min_value ||
+                                   (image[nidx] == min_value && nidx < min_index)))
+                {
+                    min_value = image[nidx];
+                    min_index = nidx;
+                }
+            }
         }
 
         indices[i] = min_index;
@@ -122,15 +95,15 @@ _merge_flat_zones = cp.ElementwiseKernel(
     r"""
     if (mask[i])
     {
-        long long z = i / (height * width);
-        long long y = (i % (height * width)) / width;
-        long long x = i % width;
-        long long r = roots[i];
+        ll z = i / (height * width);
+        ll y = (i % (height * width)) / width;
+        ll x = i % width;
+        ll r = roots[i];
 
-        long long nz, ny, nx, nidx;
         T i_value = image[i];
         T r_value = image[r];
 
+        ll nz, ny, nx, nidx;
         nz = z + 1;
         ny = y;
         nx = x;
