@@ -100,16 +100,6 @@ _group_by = cp.ElementwiseKernel(
     "_group_by",
 )
 
-def _measure_time(func):
-    import time
-    def wrapper(*args, **kwargs):
-        start = time.time()
-        result = func(*args, **kwargs)
-        end = time.time()
-        print(f"{func.__name__:<10} took: {end - start:>6.3f} secs")
-        return result
-    return wrapper
-
 def watershed_from_minima(
     image: cp.ndarray,
     mask: cp.ndarray,
@@ -133,13 +123,13 @@ def watershed_from_minima(
     flat_mask = mask.ravel()
     flat_image = image.ravel()
 
-    _measure_time(_3d_image_1nn)(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), data, indices, size=size)
+    _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), data, indices, size=size)
 
-    graph = _measure_time(csp.csr_matrix)((data, indices, indptr), shape=(size, size))
-    n_cc, cc = _measure_time(connected_components)(graph, directed=True, connection='weak', return_labels=True)
+    graph = csp.csr_matrix((data, indices, indptr), shape=(size, size))
+    n_cc, cc = connected_components(graph, directed=True, connection='weak', return_labels=True)
 
     cc_min_values = cp.full(n_cc, np.inf, dtype=cp.float32)
-    _measure_time(_group_by)(cc, data, cc_min_values, size=size)
+    _group_by(cc, data, cc_min_values, size=size)
 
     # TODO find new graph
     # _find_flat_zones(flat_image, flat_mask, cc, cc_min_values, size=size)
