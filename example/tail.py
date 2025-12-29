@@ -1,6 +1,6 @@
 import logging
 
-logging.getLogger("cu1nn.image").setLevel(logging.INFO)
+logging.basicConfig(level=logging.INFO)
 
 import time
 
