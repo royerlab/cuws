@@ -83,6 +83,23 @@ _3d_image_1nn = cp.ElementwiseKernel(
     preamble=preamble,
 )
 
+_assign_root = cp.ElementwiseKernel(
+    r"raw int64 indices, raw bool mask",
+    r"raw int64 roots",
+    r"""
+    if (mask[i]) {
+        long long r = indices[i];
+        while (r != indices[r]) {
+            r = indices[r];
+        }
+        roots[i] = r;
+    } else {
+        roots[i] = -1;
+    }
+    """,
+    r"_assign_root",
+)
+
 
 # _find_flat_zones = cp.ElementwiseKernel(
 #     r"raw int32 image, raw bool mask, raw int32 labels, raw float32 min_values",
@@ -125,9 +142,17 @@ def watershed_from_minima(
 
     _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), data, indices, size=size)
 
-    graph = csp.csr_matrix((data, indices, indptr), shape=(size, size))
-    n_cc, cc = connected_components(graph, directed=True, connection='weak', return_labels=True)
+    # TODO: swap connected_components with path compression to root (minimum)
+    # TODO: there shouldn't be a cycle, because the minimum points to itself, but beware
+    # graph = csp.csr_matrix((data, indices, indptr), shape=(size, size))
+    # n_cc, cc = connected_components(graph, directed=True, connection='weak', return_labels=True)
 
+    roots = cp.arange(size, dtype=cp.int64)
+    _assign_root(indices, flat_mask, roots, size=size)
+
+    return roots.reshape(orig_shape)
+
+    # OLD CODE
     cc_min_values = cp.full(n_cc, np.inf, dtype=cp.float32)
     _group_by(cc, data, cc_min_values, size=size)
 
