@@ -19,6 +19,7 @@ preamble = r"""
 """
 
 
+# TODO: convert to rawkernel with 3D grid and block
 _3d_image_1nn = cp.ElementwiseKernel(
     r"raw T image, raw bool mask, int64 depth, int64 height, int64 width",
     r"raw float32 data, raw int64 indices",
@@ -82,6 +83,14 @@ _3d_image_1nn = cp.ElementwiseKernel(
     preamble=preamble,
 )
 
+
+# _find_flat_zones = cp.ElementwiseKernel(
+#     r"raw int32 image, raw bool mask, raw int32 labels, raw float32 min_values",
+#     """
+#     """,
+#     r"_find_flat_zones",
+# )
+
 _group_by = cp.ElementwiseKernel(
     "raw int32 labels, raw float32 values",
     "raw float32 min_values",
@@ -91,6 +100,15 @@ _group_by = cp.ElementwiseKernel(
     "_group_by",
 )
 
+def _measure_time(func):
+    import time
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = func(*args, **kwargs)
+        end = time.time()
+        print(f"{func.__name__:<10} took: {end - start:>6.3f} secs")
+        return result
+    return wrapper
 
 def watershed_from_minima(
     image: cp.ndarray,
@@ -113,15 +131,19 @@ def watershed_from_minima(
     data = cp.zeros(size, dtype=cp.float32)
 
     flat_mask = mask.ravel()
+    flat_image = image.ravel()
 
-    _3d_image_1nn(image.ravel(), flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), data, indices, size=size)
+    _measure_time(_3d_image_1nn)(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), data, indices, size=size)
 
-    sparse_image = csp.csr_matrix((data, indices, indptr), shape=(size, size))
-
-    n_cc, cc = connected_components(sparse_image, directed=True, connection='weak', return_labels=True)
+    graph = _measure_time(csp.csr_matrix)((data, indices, indptr), shape=(size, size))
+    n_cc, cc = _measure_time(connected_components)(graph, directed=True, connection='weak', return_labels=True)
 
     cc_min_values = cp.full(n_cc, np.inf, dtype=cp.float32)
-    _group_by(cc, data, cc_min_values, size=size)
+    _measure_time(_group_by)(cc, data, cc_min_values, size=size)
+
+    # TODO find new graph
+    # _find_flat_zones(flat_image, flat_mask, cc, cc_min_values, size=size)
+    # n_cc, cc = connected_components(graph, directed=True, connection='weak', return_labels=True)
 
     cc = cp.where(flat_mask, cc + 1, 0)
     # TODO: use connected_components lower level API, to take of masking and relabel and +1 ourselves
