@@ -1,0 +1,43 @@
+import logging
+
+logging.getLogger("cu1nn.image").setLevel(logging.INFO)
+
+import time
+
+import cupy as cp
+import cu1nn
+import napari
+import zarr
+
+
+def main() -> None:
+
+    path = "/home/jordao/Softwares/ultrack-td/examples/"
+    contour = zarr.open(path + "boundaries.zarr")[0]
+    foreground = zarr.open(path + "detection.zarr")[0]
+
+    start = time.time()
+    cu_contour = cp.asarray(contour)
+    cu_foreground = cp.asarray(foreground)
+    end = time.time()
+    print(f"CPU->GPU: {end - start} seconds")
+
+    start = time.time()
+    labels = cu1nn.watershed_from_minima(cu_contour, cu_foreground)
+    end = time.time()
+    print(f"watershed: {end - start} seconds")
+
+    start = time.time()
+    labels = labels.get()
+    end = time.time()
+    print(f"GPU->CPU: {end - start} seconds")
+
+    viewer = napari.Viewer()
+    viewer.add_image(contour)
+    viewer.add_labels(labels)
+    napari.run()
+
+
+
+if __name__ == "__main__":
+    main()
