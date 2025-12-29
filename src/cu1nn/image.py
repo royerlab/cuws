@@ -79,17 +79,20 @@ _assign_root = cp.ElementwiseKernel(
 
 _merge_flat_zones = cp.ElementwiseKernel(
     r"raw T image, raw bool mask, int64 depth, int64 height, int64 width",
-    r"raw int64 roots",
+    r"raw int64 roots, raw int64 n_changed",
     r"""
     if (mask[i])
     {
+        ll r = roots[i];
+        T i_value = image[i];
+        T r_value = image[r];
+
+        // this is only possible if the pixel is tied with the root
+        if (r_value != i_value) return;
+
         ll z = i / (height * width);
         ll y = (i % (height * width)) / width;
         ll x = i % width;
-        ll r = roots[i];
-
-        T i_value = image[i];
-        T r_value = image[r];
 
         #pragma unroll
         for (int j = 0; j < d_size; ++j)
@@ -104,7 +107,7 @@ _merge_flat_zones = cp.ElementwiseKernel(
                 if (mask[nidx]) {
                     ll nr = roots[nidx];
                     T nr_value = image[nr];
-                    if (image[nidx] == r_value &&  // tie-zone
+                    if (image[nidx] == i_value &&  // tie-zone
                         (r_value > nr_value || (r_value == nr_value && r > nr))) // deeper root
                     {
                         r_value = nr_value;
@@ -112,6 +115,9 @@ _merge_flat_zones = cp.ElementwiseKernel(
                     }
                 }
             }
+        }
+        if (r != roots[i]) {
+            atomicAdd(&n_changed[0], 1);
         }
         roots[i] = r;
     }
@@ -153,11 +159,19 @@ def watershed_from_minima(
 
     _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), indices, size=size)
 
-    roots = indices.copy()
+    roots = indices.copy() # TODO: I could just use indices directly and avoiding copy
     _assign_root(flat_mask, roots, size=size)
 
-    _merge_flat_zones(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=size)
-    _assign_root(flat_mask, roots, size=size)
+    n_iters = 0
+    n_changed = cp.ones(1, dtype=cp.int64)
+
+    while n_changed[0] > 0:
+        n_changed[0] = 0
+        _merge_flat_zones(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, n_changed, size=size)
+        _assign_root(flat_mask, roots, size=size)
+        n_iters += 1
+
+    print(f"Performed {n_iters} merge-flat-zones iterations")
 
     _relabel_inplace(flat_mask, roots)
 
