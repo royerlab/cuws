@@ -15,7 +15,6 @@ __constant__ int d_size = 26;
 __constant__ ll dz[] = {-1, -1, -1, -1, -1, -1, -1, -1, -1,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1};
 __constant__ ll dy[] = {-1, -1, -1,  0,  0,  0,  1,  1,  1, -1, -1, -1,  0,  0,  1,  1,  1, -1, -1, -1,  0,  0,  0,  1,  1,  1};
 __constant__ ll dx[] = {-1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1};
-
 """
 
 
@@ -59,6 +58,7 @@ _3d_image_1nn = cp.ElementwiseKernel(
     r"_3d_image_1nn",
     preamble=preamble,
 )
+
 
 _assign_root = cp.ElementwiseKernel(
     r"raw bool mask",
@@ -153,23 +153,20 @@ def watershed_from_minima(
     
     size = np.prod(image.shape)
 
-    indices = cp.arange(size, dtype=cp.int64)
+    roots = cp.arange(size, dtype=cp.int64)
 
     flat_mask = mask.ravel()
     flat_image = image.ravel()
 
-    _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), indices, size=size)
-
-    roots = indices.copy() # TODO: I could just use indices directly and avoiding copy
-    _assign_root(flat_mask, roots, size=size)
+    _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=size)
 
     n_iters = 0
     n_changed = cp.ones(1, dtype=cp.int64)
 
     while n_changed[0] > 0:
+        _assign_root(flat_mask, roots, size=size)
         n_changed[0] = 0
         _merge_flat_zones(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, n_changed, size=size)
-        _assign_root(flat_mask, roots, size=size)
         n_iters += 1
 
     LOG.info("Performed %d merge-flat-zones iterations", n_iters)
