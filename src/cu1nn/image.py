@@ -46,11 +46,11 @@ _3d_image_1nn = cp.ElementwiseKernel(
         const ll dx[] = {0, 0, 0, 0, 1, -1};
 
         #pragma unroll
-        for (int i = 0; i < 6; ++i)
+        for (int j = 0; j < 6; ++j)
         {
-            ll nz = z + dz[i];
-            ll ny = y + dy[i];
-            ll nx = x + dx[i];
+            ll nz = z + dz[j];
+            ll ny = y + dy[j];
+            ll nx = x + dx[j];
 
             if (nz >= 0 && nz < depth && ny >= 0 && ny < height && nx >= 0 && nx < width)
             {
@@ -103,51 +103,46 @@ _merge_flat_zones = cp.ElementwiseKernel(
         T i_value = image[i];
         T r_value = image[r];
 
-        ll nz, ny, nx, nidx;
-        nz = z + 1;
-        ny = y;
-        nx = x;
+        const ll dz[] = {1, -1, 0, 0, 0, 0};
+        const ll dy[] = {0, 0, 1, -1, 0, 0};
+        const ll dx[] = {0, 0, 0, 0, 1, -1};
 
-        if (nz < depth) {
-            nidx = IDX(nz, ny, nx, height, width);
-            SWAPROOT(roots, image, r_value, r, i, nidx);
-        }
+        #pragma unroll
+        for (int j = 0; j < 6; ++j)
+        {
+            ll nz = z + dz[j];
+            ll ny = y + dy[j];
+            ll nx = x + dx[j];
 
-        nz = z - 1;
-        if (nz >= 0) {
-            nidx = IDX(nz, ny, nx, height, width);
-            SWAPROOT(roots, image, r_value, r, i, nidx);
+            if (nz >= 0 && nz < depth && ny >= 0 && ny < height && nx >= 0 && nx < width)
+            {
+                ll nidx = IDX(nz, ny, nx, height, width);
+                if (mask[nidx]) {
+                    ll nr = roots[nidx];
+                    T nr_value = image[nr];
+                    if (image[nidx] == i_value &&  // tie-zone
+                        (r_value > nr_value || (r_value == nr_value && r > nr))) // deeper root
+                    {
+                        r_value = nr_value;
+                        r = nr;
+                    }
+                }
+            }
         }
-
-        nz = z;
-        ny = y + 1;
-        if (ny < height) {
-            nidx = IDX(nz, ny, nx, height, width);
-            SWAPROOT(roots, image, r_value, r, i, nidx);
-        }
-
-        ny = y - 1;
-        if (ny >= 0) {
-            nidx = IDX(nz, ny, nx, height, width);
-            SWAPROOT(roots, image, r_value, r, i, nidx);
-        }
-
-        ny = y;
-        nx = x + 1;
-        if (nx < width) {
-            nidx = IDX(nz, ny, nx, height, width);
-            SWAPROOT(roots, image, r_value, r, i, nidx);
-        }
-
-        nx = x - 1;
-        if (nx >= 0) {
-            nidx = IDX(nz, ny, nx, height, width);
-            SWAPROOT(roots, image, r_value, r, i, nidx);
-        }
+        roots[i] = r;
     }
     """,
     r"_merge_flat_zones",
     preamble=preamble,
+)
+
+
+_relabel_inplace = cp.ElementwiseKernel(
+    r"bool mask", r"int64 roots",
+    r"""
+    roots = (mask) ? roots + 1 : 0;
+    """,
+    r"_relabel_inplace",
 )
 
 
@@ -179,5 +174,7 @@ def watershed_from_minima(
 
     _merge_flat_zones(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=size)
     _assign_root(flat_mask, roots, size=size)
+
+    _relabel_inplace(flat_mask, roots)
 
     return roots.reshape(orig_shape)
