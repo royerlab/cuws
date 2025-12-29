@@ -38,7 +38,7 @@ preamble = r"""
 # TODO: convert to rawkernel with 3D grid and block
 _3d_image_1nn = cp.ElementwiseKernel(
     r"raw T image, raw bool mask, int64 depth, int64 height, int64 width",
-    r"raw float32 data, raw int64 indices",
+    r"raw int64 indices",
     r"""
     if (mask[i])
     {
@@ -92,7 +92,6 @@ _3d_image_1nn = cp.ElementwiseKernel(
         }
 
         indices[i] = min_index;
-        data[i] = min_value + 1e-8f; // avoiding zeros
     }
     """,
     r"_3d_image_1nn",
@@ -195,14 +194,12 @@ def watershed_from_minima(
     
     size = np.prod(image.shape)
 
-    indptr = cp.arange(size + 1, dtype=cp.int64)
     indices = cp.arange(size, dtype=cp.int64)
-    data = cp.zeros(size, dtype=cp.float32)
 
     flat_mask = mask.ravel()
     flat_image = image.ravel()
 
-    _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), data, indices, size=size)
+    _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), indices, size=size)
 
     roots = indices.copy()
     _assign_root(flat_mask, roots, size=size)
