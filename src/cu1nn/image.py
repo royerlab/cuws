@@ -7,15 +7,31 @@ from cupyx.scipy.sparse.csgraph import connected_components
 
 preamble = r"""
 #define SWAPMIN(values, mask, idx, min_value, min_index) \
+{ \
     if (mask[idx] && \
         (values[idx] < min_value || \
          (values[idx] == min_value && idx < min_index))) \
     { \
         min_value = values[idx]; \
         min_index = idx; \
-    }
+    } \
+}
 
 #define IDX(z, y, x, height, width) (z * height * width + y * width + x)
+
+#define SWAPROOT(roots, values, ri_value, r, i, nidx) \
+{ \
+    long long nr = roots[nidx]; \
+    T nv = values[nr]; \
+    if (values[nidx] == ri_value && \
+        (ri_value > nv || \
+         (ri_value == nv && r > nr))) \
+    { \
+        ri_value = nv; \
+        r = nr; \
+        roots[i] = nr; \
+    } \
+}
 """
 
 
@@ -84,13 +100,13 @@ _3d_image_1nn = cp.ElementwiseKernel(
 )
 
 _assign_root = cp.ElementwiseKernel(
-    r"raw int64 indices, raw bool mask",
+    r"raw bool mask",
     r"raw int64 roots",
     r"""
     if (mask[i]) {
-        long long r = indices[i];
-        while (r != indices[r]) {
-            r = indices[r];
+        long long r = roots[i];
+        while (r != roots[r]) {
+            r = roots[r];
         }
         roots[i] = r;
     } else {
@@ -101,21 +117,67 @@ _assign_root = cp.ElementwiseKernel(
 )
 
 
-# _find_flat_zones = cp.ElementwiseKernel(
-#     r"raw int32 image, raw bool mask, raw int32 labels, raw float32 min_values",
-#     """
-#     """,
-#     r"_find_flat_zones",
-# )
+_merge_flat_zones = cp.ElementwiseKernel(
+    r"raw T image, raw bool mask, int64 depth, int64 height, int64 width",
+    r"raw int64 roots",
+    r"""
+    if (mask[i])
+    {
+        long long z = i / (height * width);
+        long long y = (i % (height * width)) / width;
+        long long x = i % width;
+        long long r = roots[i];
 
-_group_by = cp.ElementwiseKernel(
-    "raw int32 labels, raw float32 values",
-    "raw float32 min_values",
-    """
-    atomicMin(&min_values[labels[i]], values[i]);
+        long long nz, ny, nx, nidx;
+        T i_value = image[i];
+        T r_value = image[r];
+
+        nz = z + 1;
+        ny = y;
+        nx = x;
+
+        if (nz < depth) {
+            nidx = IDX(nz, ny, nx, height, width);
+            SWAPROOT(roots, image, r_value, r, i, nidx);
+        }
+
+        nz = z - 1;
+        if (nz >= 0) {
+            nidx = IDX(nz, ny, nx, height, width);
+            SWAPROOT(roots, image, r_value, r, i, nidx);
+        }
+
+        nz = z;
+        ny = y + 1;
+        if (ny < height) {
+            nidx = IDX(nz, ny, nx, height, width);
+            SWAPROOT(roots, image, r_value, r, i, nidx);
+        }
+
+        ny = y - 1;
+        if (ny >= 0) {
+            nidx = IDX(nz, ny, nx, height, width);
+            SWAPROOT(roots, image, r_value, r, i, nidx);
+        }
+
+        ny = y;
+        nx = x + 1;
+        if (nx < width) {
+            nidx = IDX(nz, ny, nx, height, width);
+            SWAPROOT(roots, image, r_value, r, i, nidx);
+        }
+
+        nx = x - 1;
+        if (nx >= 0) {
+            nidx = IDX(nz, ny, nx, height, width);
+            SWAPROOT(roots, image, r_value, r, i, nidx);
+        }
+    }
     """,
-    "_group_by",
+    r"_merge_flat_zones",
+    preamble=preamble,
 )
+
 
 def watershed_from_minima(
     image: cp.ndarray,
@@ -142,25 +204,10 @@ def watershed_from_minima(
 
     _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), data, indices, size=size)
 
-    # TODO: swap connected_components with path compression to root (minimum)
-    # TODO: there shouldn't be a cycle, because the minimum points to itself, but beware
-    # graph = csp.csr_matrix((data, indices, indptr), shape=(size, size))
-    # n_cc, cc = connected_components(graph, directed=True, connection='weak', return_labels=True)
+    roots = indices.copy()
+    _assign_root(flat_mask, roots, size=size)
 
-    roots = cp.arange(size, dtype=cp.int64)
-    _assign_root(indices, flat_mask, roots, size=size)
+    _merge_flat_zones(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=size)
+    _assign_root(flat_mask, roots, size=size)
 
     return roots.reshape(orig_shape)
-
-    # OLD CODE
-    cc_min_values = cp.full(n_cc, np.inf, dtype=cp.float32)
-    _group_by(cc, data, cc_min_values, size=size)
-
-    # TODO find new graph
-    # _find_flat_zones(flat_image, flat_mask, cc, cc_min_values, size=size)
-    # n_cc, cc = connected_components(graph, directed=True, connection='weak', return_labels=True)
-
-    cc = cp.where(flat_mask, cc + 1, 0)
-    # TODO: use connected_components lower level API, to take of masking and relabel and +1 ourselves
-
-    return cc.reshape(orig_shape)
