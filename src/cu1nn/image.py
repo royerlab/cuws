@@ -1,8 +1,9 @@
 
+import logging
 import numpy as np
 import cupy as cp
-import cupyx.scipy.sparse as csp
-from cupyx.scipy.sparse.csgraph import connected_components
+
+LOG = logging.getLogger(__name__)
 
 
 preamble = r"""
@@ -171,7 +172,7 @@ def watershed_from_minima(
         _assign_root(flat_mask, roots, size=size)
         n_iters += 1
 
-    print(f"Performed {n_iters} merge-flat-zones iterations")
+    LOG.info("Performed %d merge-flat-zones iterations", n_iters)
 
     _relabel_inplace(flat_mask, roots)
 
