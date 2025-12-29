@@ -10,19 +10,11 @@ preamble = r"""
 
 typedef long long ll;
 
-#define SWAPROOT(roots, values, ri_value, r, i, nidx) \
-{ \
-    long long nr = roots[nidx]; \
-    T nv = values[nr]; \
-    if (values[nidx] == ri_value && \
-        (ri_value > nv || \
-         (ri_value == nv && r > nr))) \
-    { \
-        ri_value = nv; \
-        r = nr; \
-        roots[i] = nr; \
-    } \
-}
+__constant__ int d_size = 26;
+__constant__ ll dz[] = {-1, -1, -1, -1, -1, -1, -1, -1, -1,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1};
+__constant__ ll dy[] = {-1, -1, -1,  0,  0,  0,  1,  1,  1, -1, -1, -1,  0,  0,  1,  1,  1, -1, -1, -1,  0,  0,  0,  1,  1,  1};
+__constant__ ll dx[] = {-1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1};
+
 """
 
 
@@ -41,12 +33,8 @@ _3d_image_1nn = cp.ElementwiseKernel(
         T min_value = image[i];
         ll min_index = i;
 
-        const ll dz[] = {1, -1, 0, 0, 0, 0};
-        const ll dy[] = {0, 0, 1, -1, 0, 0};
-        const ll dx[] = {0, 0, 0, 0, 1, -1};
-
         #pragma unroll
-        for (int j = 0; j < 6; ++j)
+        for (int j = 0; j < d_size; ++j)
         {
             ll nz = z + dz[j];
             ll ny = y + dy[j];
@@ -103,12 +91,8 @@ _merge_flat_zones = cp.ElementwiseKernel(
         T i_value = image[i];
         T r_value = image[r];
 
-        const ll dz[] = {1, -1, 0, 0, 0, 0};
-        const ll dy[] = {0, 0, 1, -1, 0, 0};
-        const ll dx[] = {0, 0, 0, 0, 1, -1};
-
         #pragma unroll
-        for (int j = 0; j < 6; ++j)
+        for (int j = 0; j < d_size; ++j)
         {
             ll nz = z + dz[j];
             ll ny = y + dy[j];
@@ -120,7 +104,7 @@ _merge_flat_zones = cp.ElementwiseKernel(
                 if (mask[nidx]) {
                     ll nr = roots[nidx];
                     T nr_value = image[nr];
-                    if (image[nidx] == i_value &&  // tie-zone
+                    if (image[nidx] == r_value &&  // tie-zone
                         (r_value > nr_value || (r_value == nr_value && r > nr))) // deeper root
                     {
                         r_value = nr_value;
