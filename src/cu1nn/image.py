@@ -1,7 +1,7 @@
-
 import logging
-import numpy as np
+
 import cupy as cp
+import numpy as np
 
 LOG = logging.getLogger(__name__)
 
@@ -14,9 +14,15 @@ preamble = r"""
 typedef unsigned long long ull;
 
 __constant__ int d_size = 26;
-__constant__ int dz[] = {-1, -1, -1, -1, -1, -1, -1, -1, -1,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1};
-__constant__ int dy[] = {-1, -1, -1,  0,  0,  0,  1,  1,  1, -1, -1, -1,  0,  0,  1,  1,  1, -1, -1, -1,  0,  0,  0,  1,  1,  1};
-__constant__ int dx[] = {-1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1};
+__constant__ int dz[] = {
+    -1, -1, -1, -1, -1, -1, -1, -1, -1,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1
+};
+__constant__ int dy[] = {
+    -1, -1, -1,  0,  0,  0,  1,  1,  1, -1, -1, -1,  0,  0,  1,  1,  1, -1, -1, -1,  0,  0,  0,  1,  1,  1
+};
+__constant__ int dx[] = {
+    -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1
+};
 """
 
 _3d_image_1nn_str = r"""
@@ -147,7 +153,8 @@ _merge_flat_zones_sparse = cp.ElementwiseKernel(
 )
 
 _relabel_inplace = cp.ElementwiseKernel(
-    r"bool mask", r"uint64 roots",
+    r"bool mask",
+    r"uint64 roots",
     r"""
     roots = (mask) ? (roots & IDX_MASK) + 1 : 0;
     """,
@@ -161,7 +168,6 @@ def watershed_from_minima(
     mask: cp.ndarray,
     sparse: bool = True,
 ) -> cp.ndarray:
-
     orig_shape = image.shape
 
     if image.ndim == 2:
@@ -170,13 +176,13 @@ def watershed_from_minima(
 
     if image.shape != mask.shape:
         raise ValueError(f"Image and mask must have the same shape: {image.shape} != {mask.shape}")
-    
+
     if image.dtype != np.uint16:
         raise ValueError(f"Image must be of type 'uint16', got '{image.dtype}'")
-    
+
     size = np.prod(image.shape)
-    if size > 2 ** 48:
-        raise ValueError(f"Size '{size}' is larger than the maximum supported size of '2 ** 48' ({2 ** 48})")
+    if size > 2**48:
+        raise ValueError(f"Size '{size}' is larger than the maximum supported size of '2 ** 48' ({2**48})")
 
     roots = cp.arange(size, dtype=cp.uint64)
 
@@ -191,18 +197,52 @@ def watershed_from_minima(
         non_zero_indices = cp.nonzero(flat_mask)[0]
         non_zero_size = non_zero_indices.size
 
-        _3d_image_1nn_sparse(non_zero_indices, flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=non_zero_size)
+        _3d_image_1nn_sparse(
+            non_zero_indices,
+            flat_image,
+            flat_mask,
+            int(image.shape[0]),
+            int(image.shape[1]),
+            int(image.shape[2]),
+            roots,
+            size=non_zero_size,
+        )
         _assign_root_sparse(non_zero_indices, flat_mask, roots, size=non_zero_size)
 
         # TODO: flat zones kernel could be launched for the subset of pixels that require it
-        _merge_flat_zones_sparse(non_zero_indices, flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=non_zero_size)
+        _merge_flat_zones_sparse(
+            non_zero_indices,
+            flat_image,
+            flat_mask,
+            int(image.shape[0]),
+            int(image.shape[1]),
+            int(image.shape[2]),
+            roots,
+            size=non_zero_size,
+        )
         _assign_root_sparse(non_zero_indices, flat_mask, roots, size=non_zero_size)
 
     else:
-        _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=size)
+        _3d_image_1nn(
+            flat_image,
+            flat_mask,
+            int(image.shape[0]),
+            int(image.shape[1]),
+            int(image.shape[2]),
+            roots,
+            size=size,
+        )
         _assign_root(flat_mask, roots, size=size)
 
-        _merge_flat_zones(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=size)
+        _merge_flat_zones(
+            flat_image,
+            flat_mask,
+            int(image.shape[0]),
+            int(image.shape[1]),
+            int(image.shape[2]),
+            roots,
+            size=size,
+        )
         _assign_root(flat_mask, roots, size=size)
 
     _relabel_inplace(flat_mask, roots)

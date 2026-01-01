@@ -1,15 +1,15 @@
-import numpy as np
 import cupy as cp
-import napari
-import cu1nn
 import edt
-
+import napari
+import numpy as np
 from cupyx.profiler import benchmark
+
+import cu1nn
 
 
 def main() -> None:
     # Generate an initial image with two overlapping circles
-    size = 2 ** 10
+    size = 2**10
     print(f"Size: {size, size}")
     x, y = np.indices((size, size))
     x, y = x / size, y / size
@@ -30,7 +30,12 @@ def main() -> None:
     contour = contour - contour.min()
     contour = contour.astype(np.uint16)
 
-    results = benchmark(cu1nn.watershed_from_minima, args=(cp.asarray(contour), cp.asarray(foreground)), n_repeat=5, n_warmup=2)
+    results = benchmark(
+        cu1nn.watershed_from_minima,
+        args=(cp.asarray(contour), cp.asarray(foreground)),
+        n_repeat=5,
+        n_warmup=2,
+    )
     gpu_times = results.gpu_times
     cpu_times = results.cpu_times
     print(f"GPU times: {gpu_times.mean():>6.3f}+/-{gpu_times.std():>6.3f} secs")
@@ -45,27 +50,21 @@ def main() -> None:
 
     points = np.stack([y, x], axis=1)
     values = contour[y, x]
-    for lb, pt, val in zip(uniq_labels, points, values):
+    for lb, pt, val in zip(uniq_labels, points, values, strict=True):
         print(f"{lb}: at {pt} with value {val}")
-    
+
     text = {
-        'string': 'Value is {value:.2f}',
-        'size': 10,
-        'color': 'black',
-        'translation': np.array([0, 0]),
+        "string": "Value is {value:.2f}",
+        "size": 10,
+        "color": "black",
+        "translation": np.array([0, 0]),
     }
-    
+
     viewer = napari.Viewer()
     viewer.add_image(contour)
     viewer.add_labels(labels)
-    viewer.add_points(
-        points, size=2,
-        face_color="white",
-        properties={"value": values},
-        text=text
-    )
+    viewer.add_points(points, size=2, face_color="white", properties={"value": values}, text=text)
     napari.run()
-
 
 
 if __name__ == "__main__":

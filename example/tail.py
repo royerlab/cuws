@@ -1,17 +1,16 @@
 import logging
-
-logging.basicConfig(level=logging.INFO)
-
 import time
 
 import cupy as cp
-import cu1nn
 import napari
 import zarr
 
+import cu1nn
+
+logging.basicConfig(level=logging.INFO)
+
 
 def main() -> None:
-
     path = "/home/jordao/Softwares/ultrack-td/examples/"
     contour = zarr.open(path + "boundaries.zarr")[0]
     foreground = zarr.open(path + "detection.zarr")[0]
@@ -25,7 +24,7 @@ def main() -> None:
     end = time.time()
     print(f"CPU->GPU: {end - start} seconds")
 
-    cu_contour = (cu_contour * (2 ** 16)).astype(cp.uint16)
+    cu_contour = (cu_contour * (2**16)).astype(cp.uint16)
 
     # warmup
     print("Executing warmup run...")
@@ -46,7 +45,6 @@ def main() -> None:
     viewer.add_image(contour)
     viewer.add_labels(labels)
     napari.run()
-
 
 
 if __name__ == "__main__":
