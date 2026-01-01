@@ -4,7 +4,7 @@ import napari
 import numpy as np
 from cupyx.profiler import benchmark
 
-import cu1nn
+import cuws
 
 
 def main() -> None:
@@ -31,7 +31,7 @@ def main() -> None:
     contour = contour.astype(np.uint16)
 
     results = benchmark(
-        cu1nn.watershed_from_minima,
+        cuws.watershed_from_minima,
         args=(cp.asarray(contour), cp.asarray(foreground)),
         n_repeat=5,
         n_warmup=2,
@@ -41,7 +41,7 @@ def main() -> None:
     print(f"GPU times: {gpu_times.mean():>6.3f}+/-{gpu_times.std():>6.3f} secs")
     print(f"CPU times: {cpu_times.mean():>6.3f}+/-{cpu_times.std():>6.3f} secs")
 
-    labels = cu1nn.watershed_from_minima(cp.asarray(contour), cp.asarray(foreground))
+    labels = cuws.watershed_from_minima(cp.asarray(contour), cp.asarray(foreground))
     labels = labels.get()
 
     uniq_labels = np.unique(labels)[1:] - 1

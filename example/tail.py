@@ -5,7 +5,7 @@ import cupy as cp
 import napari
 import zarr
 
-import cu1nn
+import cuws
 
 logging.basicConfig(level=logging.INFO)
 
@@ -28,11 +28,11 @@ def main() -> None:
 
     # warmup
     print("Executing warmup run...")
-    cu1nn.watershed_from_minima(cu_contour, cu_foreground)
+    cuws.watershed_from_minima(cu_contour, cu_foreground)
     print("done")
 
     start = time.time()
-    labels = cu1nn.watershed_from_minima(cu_contour, cu_foreground)
+    labels = cuws.watershed_from_minima(cu_contour, cu_foreground)
     end = time.time()
     print(f"watershed: {end - start} seconds")
 
