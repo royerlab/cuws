@@ -28,8 +28,7 @@ def main() -> None:
 
     contour = -distance
     contour = contour - contour.min()
-    contour = contour.astype(np.float32)
-    contour = np.round(contour, 6)
+    contour = contour.astype(np.uint16)
 
     results = benchmark(cu1nn.watershed_from_minima, args=(cp.asarray(contour), cp.asarray(foreground)), n_repeat=5, n_warmup=2)
     gpu_times = results.gpu_times

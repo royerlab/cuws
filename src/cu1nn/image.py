@@ -8,6 +8,8 @@ LOG = logging.getLogger(__name__)
 
 preamble = r"""
 #define IDX(z, y, x, height, width) (z * height * width + y * width + x)
+#define IDX_MASK (~(0xFFFFULL << 48))
+#define VAL_IDX(val, idx) (idx | ((ull) val << 48))
 
 typedef unsigned long long ull;
 
@@ -18,9 +20,8 @@ __constant__ int dx[] = {-1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  1,
 """
 
 
-# TODO: convert to rawkernel with 3D grid and block
 _3d_image_1nn = cp.ElementwiseKernel(
-    r"raw T image, raw bool mask, int64 depth, int64 height, int64 width",
+    r"raw uint16 image, raw bool mask, int64 depth, int64 height, int64 width",
     r"raw uint64 indices",
     r"""
     if (mask[i])
@@ -30,8 +31,7 @@ _3d_image_1nn = cp.ElementwiseKernel(
         ull x = i % width;
 
         ull nz, ny, nx, nidx;
-        T min_value = image[i];
-        ull min_index = i;
+        ull min_value = VAL_IDX(image[i], i);
 
         #pragma unroll
         for (int j = 0; j < d_size; ++j)
@@ -44,16 +44,16 @@ _3d_image_1nn = cp.ElementwiseKernel(
             if (nz < depth && ny < height && nx < width)
             {
                 ull nidx = IDX(nz, ny, nx, height, width);
-                if (mask[nidx] && (image[nidx] < min_value ||
-                                   (image[nidx] == min_value && nidx < min_index)))
-                {
-                    min_value = image[nidx];
-                    min_index = nidx;
+                if (mask[nidx]) {
+                    ull nval = VAL_IDX(image[nidx], nidx);
+                    if (nval < min_value) {
+                        min_value = nval;
+                    }
                 }
             }
         }
 
-        indices[i] = min_index;
+        indices[i] = min_value;
     }
     """,
     r"_3d_image_1nn",
@@ -66,28 +66,28 @@ _assign_root = cp.ElementwiseKernel(
     r"raw uint64 roots",
     r"""
     if (mask[i]) {
-        unsigned long long r = roots[i];
-        while (r != roots[r]) {
-            r = roots[r];
+        ull next, r = roots[i];
+        while (r != (next = roots[r & IDX_MASK])) {
+            r = next;
         }
         roots[i] = r;
-    } else {
-        roots[i] = -1;
     }
     """,
     r"_assign_root",
+    preamble=preamble,
 )
 
 
 _merge_flat_zones = cp.ElementwiseKernel(
-    r"raw T image, raw bool mask, int64 depth, int64 height, int64 width",
-    r"raw uint64 roots, raw uint64 n_changed",
+    r"raw uint16 image, raw bool mask, int64 depth, int64 height, int64 width",
+    r"raw uint64 roots",
     r"""
     if (mask[i])
     {
         ull r = roots[i];
-        T i_value = image[i];
-        T r_value = image[r];
+        ull root_idx = r & IDX_MASK;
+        ull i_value = image[i];
+        ull r_value = r >> 48;
 
         // this is only possible if the pixel is tied with the root
         if (r_value != i_value) return;
@@ -108,20 +108,20 @@ _merge_flat_zones = cp.ElementwiseKernel(
                 ull nidx = IDX(nz, ny, nx, height, width);
                 if (mask[nidx]) {
                     ull nr = roots[nidx];
-                    T nr_value = image[nr];
                     if (image[nidx] == i_value &&  // tie-zone
-                        (r_value > nr_value || (r_value == nr_value && r > nr))) // deeper root
+                        r > nr) // deeper root
                     {
-                        r_value = nr_value;
                         r = nr;
                     }
                 }
             }
         }
         if (r != roots[i]) {
-            atomicAdd(&n_changed[0], 1);
+            if (root_idx != i) {
+                roots[i] = r; // using atomicMin only when necessary
+            }
+            atomicMin(&roots[root_idx], r);
         }
-        roots[i] = r;
     }
     """,
     r"_merge_flat_zones",
@@ -132,9 +132,10 @@ _merge_flat_zones = cp.ElementwiseKernel(
 _relabel_inplace = cp.ElementwiseKernel(
     r"bool mask", r"uint64 roots",
     r"""
-    roots = (mask) ? roots + 1 : 0;
+    roots = (mask) ? (roots & IDX_MASK) + 1 : 0;
     """,
     r"_relabel_inplace",
+    preamble=preamble,
 )
 
 
@@ -152,7 +153,12 @@ def watershed_from_minima(
     if image.shape != mask.shape:
         raise ValueError(f"Image and mask must have the same shape: {image.shape} != {mask.shape}")
     
+    if image.dtype != np.uint16:
+        raise ValueError(f"Image must be of type 'uint16', got '{image.dtype}'")
+    
     size = np.prod(image.shape)
+    if size > 2 ** 48:
+        raise ValueError(f"Size '{size}' is larger than the maximum supported size of '2 ** 48' ({2 ** 48})")
 
     roots = cp.arange(size, dtype=cp.uint64)
 
@@ -160,17 +166,10 @@ def watershed_from_minima(
     flat_image = image.ravel()
 
     _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=size)
+    _assign_root(flat_mask, roots, size=size)
 
-    n_iters = 0
-    n_changed = cp.ones(1, dtype=cp.uint64)
-
-    while n_changed[0] > 0:
-        _assign_root(flat_mask, roots, size=size)
-        n_changed[0] = 0
-        _merge_flat_zones(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, n_changed, size=size)
-        n_iters += 1
-
-    LOG.info("Performed %d merge-flat-zones iterations", n_iters)
+    _merge_flat_zones(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=size)
+    _assign_root(flat_mask, roots, size=size)
 
     _relabel_inplace(flat_mask, roots)
 

@@ -16,11 +16,16 @@ def main() -> None:
     contour = zarr.open(path + "boundaries.zarr")[0]
     foreground = zarr.open(path + "detection.zarr")[0]
 
+    print(f"shape: {contour.shape}")
+    print(f"num. elements: {contour.size}")
+
     start = time.time()
     cu_contour = cp.asarray(contour)
     cu_foreground = cp.asarray(foreground)
     end = time.time()
     print(f"CPU->GPU: {end - start} seconds")
+
+    cu_contour = (cu_contour * (2 ** 16)).astype(cp.uint16)
 
     start = time.time()
     labels = cu1nn.watershed_from_minima(cu_contour, cu_foreground)
