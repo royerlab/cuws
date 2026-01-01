@@ -9,40 +9,41 @@ LOG = logging.getLogger(__name__)
 preamble = r"""
 #define IDX(z, y, x, height, width) (z * height * width + y * width + x)
 
-typedef long long ll;
+typedef unsigned long long ull;
 
 __constant__ int d_size = 26;
-__constant__ ll dz[] = {-1, -1, -1, -1, -1, -1, -1, -1, -1,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1};
-__constant__ ll dy[] = {-1, -1, -1,  0,  0,  0,  1,  1,  1, -1, -1, -1,  0,  0,  1,  1,  1, -1, -1, -1,  0,  0,  0,  1,  1,  1};
-__constant__ ll dx[] = {-1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1};
+__constant__ int dz[] = {-1, -1, -1, -1, -1, -1, -1, -1, -1,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  1,  1,  1,  1,  1,  1,  1};
+__constant__ int dy[] = {-1, -1, -1,  0,  0,  0,  1,  1,  1, -1, -1, -1,  0,  0,  1,  1,  1, -1, -1, -1,  0,  0,  0,  1,  1,  1};
+__constant__ int dx[] = {-1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1};
 """
 
 
 # TODO: convert to rawkernel with 3D grid and block
 _3d_image_1nn = cp.ElementwiseKernel(
     r"raw T image, raw bool mask, int64 depth, int64 height, int64 width",
-    r"raw int64 indices",
+    r"raw uint64 indices",
     r"""
     if (mask[i])
     {
-        ll z = i / (height * width);
-        ll y = (i % (height * width)) / width;
-        ll x = i % width;
+        ull z = i / (height * width);
+        ull y = (i % (height * width)) / width;
+        ull x = i % width;
 
-        ll nz, ny, nx, nidx;
+        ull nz, ny, nx, nidx;
         T min_value = image[i];
-        ll min_index = i;
+        ull min_index = i;
 
         #pragma unroll
         for (int j = 0; j < d_size; ++j)
         {
-            ll nz = z + dz[j];
-            ll ny = y + dy[j];
-            ll nx = x + dx[j];
+            ull nz = z + dz[j];
+            ull ny = y + dy[j];
+            ull nx = x + dx[j];
 
-            if (nz >= 0 && nz < depth && ny >= 0 && ny < height && nx >= 0 && nx < width)
+            // zero check is not needed since we are using unsigned integers
+            if (nz < depth && ny < height && nx < width)
             {
-                ll nidx = IDX(nz, ny, nx, height, width);
+                ull nidx = IDX(nz, ny, nx, height, width);
                 if (mask[nidx] && (image[nidx] < min_value ||
                                    (image[nidx] == min_value && nidx < min_index)))
                 {
@@ -62,10 +63,10 @@ _3d_image_1nn = cp.ElementwiseKernel(
 
 _assign_root = cp.ElementwiseKernel(
     r"raw bool mask",
-    r"raw int64 roots",
+    r"raw uint64 roots",
     r"""
     if (mask[i]) {
-        long long r = roots[i];
+        unsigned long long r = roots[i];
         while (r != roots[r]) {
             r = roots[r];
         }
@@ -80,33 +81,33 @@ _assign_root = cp.ElementwiseKernel(
 
 _merge_flat_zones = cp.ElementwiseKernel(
     r"raw T image, raw bool mask, int64 depth, int64 height, int64 width",
-    r"raw int64 roots, raw int64 n_changed",
+    r"raw uint64 roots, raw uint64 n_changed",
     r"""
     if (mask[i])
     {
-        ll r = roots[i];
+        ull r = roots[i];
         T i_value = image[i];
         T r_value = image[r];
 
         // this is only possible if the pixel is tied with the root
         if (r_value != i_value) return;
 
-        ll z = i / (height * width);
-        ll y = (i % (height * width)) / width;
-        ll x = i % width;
+        ull z = i / (height * width);
+        ull y = (i % (height * width)) / width;
+        ull x = i % width;
 
         #pragma unroll
         for (int j = 0; j < d_size; ++j)
         {
-            ll nz = z + dz[j];
-            ll ny = y + dy[j];
-            ll nx = x + dx[j];
+            ull nz = z + dz[j];
+            ull ny = y + dy[j];
+            ull nx = x + dx[j];
 
-            if (nz >= 0 && nz < depth && ny >= 0 && ny < height && nx >= 0 && nx < width)
+            if (nz < depth && ny < height && nx < width)
             {
-                ll nidx = IDX(nz, ny, nx, height, width);
+                ull nidx = IDX(nz, ny, nx, height, width);
                 if (mask[nidx]) {
-                    ll nr = roots[nidx];
+                    ull nr = roots[nidx];
                     T nr_value = image[nr];
                     if (image[nidx] == i_value &&  // tie-zone
                         (r_value > nr_value || (r_value == nr_value && r > nr))) // deeper root
@@ -129,7 +130,7 @@ _merge_flat_zones = cp.ElementwiseKernel(
 
 
 _relabel_inplace = cp.ElementwiseKernel(
-    r"bool mask", r"int64 roots",
+    r"bool mask", r"uint64 roots",
     r"""
     roots = (mask) ? roots + 1 : 0;
     """,
@@ -153,7 +154,7 @@ def watershed_from_minima(
     
     size = np.prod(image.shape)
 
-    roots = cp.arange(size, dtype=cp.int64)
+    roots = cp.arange(size, dtype=cp.uint64)
 
     flat_mask = mask.ravel()
     flat_image = image.ravel()
@@ -161,7 +162,7 @@ def watershed_from_minima(
     _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=size)
 
     n_iters = 0
-    n_changed = cp.ones(1, dtype=cp.int64)
+    n_changed = cp.ones(1, dtype=cp.uint64)
 
     while n_changed[0] > 0:
         _assign_root(flat_mask, roots, size=size)
