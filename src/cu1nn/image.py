@@ -19,61 +19,74 @@ __constant__ int dy[] = {-1, -1, -1,  0,  0,  0,  1,  1,  1, -1, -1, -1,  0,  0,
 __constant__ int dx[] = {-1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1, -1,  0,  1};
 """
 
+_3d_image_1nn_str = r"""
+    ull z = i / (height * width);
+    ull y = (i % (height * width)) / width;
+    ull x = i % width;
+
+    ull nz, ny, nx, nidx;
+    ull min_value = VAL_IDX(image[i], i);
+
+    #pragma unroll
+    for (int j = 0; j < d_size; ++j)
+    {
+        ull nz = z + dz[j];
+        ull ny = y + dy[j];
+        ull nx = x + dx[j];
+
+        // zero check is not needed since we are using unsigned integers
+        if (nz < depth && ny < height && nx < width)
+        {
+            ull nidx = IDX(nz, ny, nx, height, width);
+            if (mask[nidx]) {
+                ull nval = VAL_IDX(image[nidx], nidx);
+                if (nval < min_value) {
+                    min_value = nval;
+                }
+            }
+        }
+    }
+
+    roots[i] = min_value;
+"""
 
 _3d_image_1nn = cp.ElementwiseKernel(
     r"raw uint16 image, raw bool mask, int64 depth, int64 height, int64 width",
     r"raw uint64 roots",
-    r"""
-    if (mask[i])
-    {
-        ull z = i / (height * width);
-        ull y = (i % (height * width)) / width;
-        ull x = i % width;
-
-        ull nz, ny, nx, nidx;
-        ull min_value = VAL_IDX(image[i], i);
-
-        #pragma unroll
-        for (int j = 0; j < d_size; ++j)
-        {
-            ull nz = z + dz[j];
-            ull ny = y + dy[j];
-            ull nx = x + dx[j];
-
-            // zero check is not needed since we are using unsigned integers
-            if (nz < depth && ny < height && nx < width)
-            {
-                ull nidx = IDX(nz, ny, nx, height, width);
-                if (mask[nidx]) {
-                    ull nval = VAL_IDX(image[nidx], nidx);
-                    if (nval < min_value) {
-                        min_value = nval;
-                    }
-                }
-            }
-        }
-
-        roots[i] = min_value;
-    }
-    """,
+    f"if (mask[i]) {{\n{_3d_image_1nn_str}\n}}\n",
     r"_3d_image_1nn",
     preamble=preamble,
 )
 
+_3d_image_1nn_sparse = cp.ElementwiseKernel(
+    r"raw int64 indices, raw uint16 image, raw bool mask, int64 depth, int64 height, int64 width",
+    r"raw uint64 roots",
+    f"i = indices[i];\n{_3d_image_1nn_str}\n",
+    r"_3d_image_1nn_sparse",
+    preamble=preamble,
+)
+
+_assign_root_str = r"""
+    ull next, r = roots[i];
+    while (r != (next = roots[r & IDX_MASK])) {
+        r = next;
+    }
+    roots[i] = r;
+"""
 
 _assign_root = cp.ElementwiseKernel(
     r"raw bool mask",
     r"raw uint64 roots",
-    r"""
-    if (mask[i]) {
-        ull next, r = roots[i];
-        while (r != (next = roots[r & IDX_MASK])) {
-            r = next;
-        }
-        roots[i] = r;
-    }
-    """,
+    f"if (mask[i]) {{\n{_assign_root_str}\n}}\n",
     r"_assign_root",
+    preamble=preamble,
+)
+
+_assign_root_sparse = cp.ElementwiseKernel(
+    r"raw int64 indices, raw bool mask",
+    r"raw uint64 roots",
+    f"i = indices[i];\n{_assign_root_str}\n",
+    r"_assign_root_sparse",
     preamble=preamble,
 )
 
@@ -125,11 +138,12 @@ _merge_flat_zones = cp.ElementwiseKernel(
     r"_merge_flat_zones",
     preamble=preamble,
 )
+
 _merge_flat_zones_sparse = cp.ElementwiseKernel(
     r"raw int64 indices, raw uint16 image, raw bool mask, int64 depth, int64 height, int64 width",
     r"raw uint64 roots",
     f"i = indices[i];\n{_merge_flat_zones_str}\n",
-    r"_merge_flat_zones",
+    r"_merge_flat_zones_sparse",
     preamble=preamble,
 )
 
@@ -174,11 +188,11 @@ def watershed_from_minima(
         non_zero_indices = cp.nonzero(flat_mask)[0]
         non_zero_size = non_zero_indices.size
 
-        _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=size)
-        _assign_root(flat_mask, roots, size=size)
+        _3d_image_1nn_sparse(non_zero_indices, flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=non_zero_size)
+        _assign_root_sparse(non_zero_indices, flat_mask, roots, size=non_zero_size)
 
         _merge_flat_zones_sparse(non_zero_indices, flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=non_zero_size)
-        _assign_root(flat_mask, roots, size=size)
+        _assign_root_sparse(non_zero_indices, flat_mask, roots, size=non_zero_size)
 
     else:
         _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=size)
