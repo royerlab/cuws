@@ -27,6 +27,11 @@ def main() -> None:
 
     cu_contour = (cu_contour * (2 ** 16)).astype(cp.uint16)
 
+    # warmup
+    print("Executing warmup run...")
+    cu1nn.watershed_from_minima(cu_contour, cu_foreground)
+    print("done")
+
     start = time.time()
     labels = cu1nn.watershed_from_minima(cu_contour, cu_foreground)
     end = time.time()
