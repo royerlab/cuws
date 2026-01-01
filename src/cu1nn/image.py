@@ -24,7 +24,6 @@ _3d_image_1nn_str = r"""
     ull y = (i % (height * width)) / width;
     ull x = i % width;
 
-    ull nz, ny, nx, nidx;
     ull min_value = VAL_IDX(image[i], i);
 
     #pragma unroll
@@ -183,6 +182,10 @@ def watershed_from_minima(
 
     flat_mask = mask.ravel()
     flat_image = image.ravel()
+
+    # TODO:
+    # - reduce branching of kernels by having different branch for border and non-border pixels
+    # - reduce number of divisions by using a 3D grid kernel
 
     if sparse:
         non_zero_indices = cp.nonzero(flat_mask)[0]
