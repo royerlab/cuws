@@ -194,6 +194,7 @@ def watershed_from_minima(
         _3d_image_1nn_sparse(non_zero_indices, flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=non_zero_size)
         _assign_root_sparse(non_zero_indices, flat_mask, roots, size=non_zero_size)
 
+        # TODO: flat zones kernel could be launched for the subset of pixels that require it
         _merge_flat_zones_sparse(non_zero_indices, flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=non_zero_size)
         _assign_root_sparse(non_zero_indices, flat_mask, roots, size=non_zero_size)
 
