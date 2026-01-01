@@ -101,8 +101,8 @@ _merge_flat_zones_str = r"""
     ull i_value = image[i];
     ull r_value = r >> 48;
 
-    // this is only possible if the pixel is tied with the root
-    if (r_value != i_value) return;
+    // we skip pixels that are outside the dynamic height range
+    if (i_value - r_value > h) return;
 
     ull z = i / (height * width);
     ull y = (i % (height * width)) / width;
@@ -120,9 +120,7 @@ _merge_flat_zones_str = r"""
             ull nidx = IDX(nz, ny, nx, height, width);
             if (mask[nidx]) {
                 ull nr = roots[nidx];
-                if (image[nidx] == i_value &&  // tie-zone
-                    r > nr) // deeper root
-                {
+                if (nr < r) { // deeper root
                     r = nr;
                 }
             }
@@ -138,7 +136,7 @@ _merge_flat_zones_str = r"""
 """
 
 _merge_flat_zones = cp.ElementwiseKernel(
-    r"raw uint16 image, raw bool mask, int64 depth, int64 height, int64 width",
+    r"raw uint16 image, raw bool mask, int64 h, int64 depth, int64 height, int64 width",
     r"raw uint64 roots, raw uint64 changed",
     f"if (mask[i]) {{\n{_merge_flat_zones_str}\n}}\n",
     r"_merge_flat_zones",
@@ -146,7 +144,7 @@ _merge_flat_zones = cp.ElementwiseKernel(
 )
 
 _merge_flat_zones_sparse = cp.ElementwiseKernel(
-    r"raw int64 indices, raw uint16 image, raw bool mask, int64 depth, int64 height, int64 width",
+    r"raw int64 indices, raw uint16 image, raw bool mask, int64 h, int64 depth, int64 height, int64 width",
     r"raw uint64 roots, raw uint64 changed",
     f"i = indices[i];\n{_merge_flat_zones_str}\n",
     r"_merge_flat_zones_sparse",
@@ -167,6 +165,7 @@ _relabel_inplace = cp.ElementwiseKernel(
 def watershed_from_minima(
     image: cp.ndarray,
     mask: cp.ndarray,
+    h: int = 0,
     sparse: bool = True,
 ) -> cp.ndarray:
     """
@@ -178,6 +177,11 @@ def watershed_from_minima(
         Grayscale image indicating the object boundaries, must be of type 'uint16'.
     mask : cp.ndarray
         Binary mask indicating the pixels that are part of the foreground.
+    h : int, optional
+        Watershed dynamic merging height, by default 0.
+        If the pixel intensity difference between the root and the boundary pixels are less than `h`,
+        they are merged to the deepest neighboring root
+        FIXME: there might be a bug here, should it merge to the deepest root or to the region with weakest boundary?
     sparse : bool, optional
         Whether to use sparse kernel, by default True.
         Sparse kernels are faster depending on the number of foreground pixels.
@@ -236,12 +240,12 @@ def watershed_from_minima(
 
         while changed[0]:
             _assign_root_sparse(non_zero_indices, flat_mask, roots, size=non_zero_size)
-            # TODO: flat zones kernel could be launched for the subset of pixels that require it
             changed[0] = 0
             _merge_flat_zones_sparse(
                 non_zero_indices,
                 flat_image,
                 flat_mask,
+                h,
                 int(image.shape[0]),
                 int(image.shape[1]),
                 int(image.shape[2]),
@@ -267,6 +271,7 @@ def watershed_from_minima(
             _merge_flat_zones(
                 flat_image,
                 flat_mask,
+                h,
                 int(image.shape[0]),
                 int(image.shape[1]),
                 int(image.shape[2]),

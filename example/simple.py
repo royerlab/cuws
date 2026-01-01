@@ -41,7 +41,7 @@ def main() -> None:
     print(f"GPU times: {gpu_times.mean():>6.3f}+/-{gpu_times.std():>6.3f} secs")
     print(f"CPU times: {cpu_times.mean():>6.3f}+/-{cpu_times.std():>6.3f} secs")
 
-    labels = cuws.watershed_from_minima(cp.asarray(contour), cp.asarray(foreground))
+    labels = cuws.watershed_from_minima(cp.asarray(contour), cp.asarray(foreground), h=1)
     labels = labels.get()
 
     uniq_labels = np.unique(labels)[1:] - 1
