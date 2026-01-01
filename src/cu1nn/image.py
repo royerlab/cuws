@@ -165,6 +165,7 @@ def watershed_from_minima(
     flat_mask = mask.ravel()
     flat_image = image.ravel()
 
+    # TODO: compute non-zero indices and launch kernels only on those
     _3d_image_1nn(flat_image, flat_mask, int(image.shape[0]), int(image.shape[1]), int(image.shape[2]), roots, size=size)
     _assign_root(flat_mask, roots, size=size)
 
