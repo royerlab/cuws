@@ -168,6 +168,29 @@ def watershed_from_minima(
     mask: cp.ndarray,
     sparse: bool = True,
 ) -> cp.ndarray:
+    """
+    Watershed segmentation from minima.
+
+    Parameters
+    ----------
+    image : cp.ndarray
+        Grayscale image indicating the object boundaries, must be of type 'uint16'.
+    mask : cp.ndarray
+        Binary mask indicating the pixels that are part of the foreground.
+    sparse : bool, optional
+        Whether to use sparse kernel, by default True.
+        Sparse kernels are faster depending on the number of foreground pixels.
+        It uses a bit more memory than the dense kernels because it needs to store the indices of the foreground pixels.
+
+    Returns
+    -------
+    cp.ndarray
+        Integer labels image with the same shape as the input image.
+        Background is labeled as 0.
+    """
+    if image.ndim != 2 and image.ndim != 3:
+        raise ValueError(f"Image must be 2D or 3D, got '{image.ndim}' dimensions")
+
     orig_shape = image.shape
 
     if image.ndim == 2:
