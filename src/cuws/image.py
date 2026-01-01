@@ -133,12 +133,13 @@ _merge_flat_zones_str = r"""
             roots[i] = r; // using atomicMin only when necessary
         }
         atomicMin(&roots[root_idx], r);
+        atomicAdd(&changed[0], 1);
     }
 """
 
 _merge_flat_zones = cp.ElementwiseKernel(
     r"raw uint16 image, raw bool mask, int64 depth, int64 height, int64 width",
-    r"raw uint64 roots",
+    r"raw uint64 roots, raw uint64 changed",
     f"if (mask[i]) {{\n{_merge_flat_zones_str}\n}}\n",
     r"_merge_flat_zones",
     preamble=preamble,
@@ -146,7 +147,7 @@ _merge_flat_zones = cp.ElementwiseKernel(
 
 _merge_flat_zones_sparse = cp.ElementwiseKernel(
     r"raw int64 indices, raw uint16 image, raw bool mask, int64 depth, int64 height, int64 width",
-    r"raw uint64 roots",
+    r"raw uint64 roots, raw uint64 changed",
     f"i = indices[i];\n{_merge_flat_zones_str}\n",
     r"_merge_flat_zones_sparse",
     preamble=preamble,
@@ -215,6 +216,8 @@ def watershed_from_minima(
     # TODO:
     # - reduce branching of kernels by having different branch for border and non-border pixels
     # - reduce number of divisions by using a 3D grid kernel
+    changed = cp.ones(1, dtype=cp.uint64)
+    n_iters = 0
 
     if sparse:
         non_zero_indices = cp.nonzero(flat_mask)[0]
@@ -230,20 +233,23 @@ def watershed_from_minima(
             roots,
             size=non_zero_size,
         )
-        _assign_root_sparse(non_zero_indices, flat_mask, roots, size=non_zero_size)
 
-        # TODO: flat zones kernel could be launched for the subset of pixels that require it
-        _merge_flat_zones_sparse(
-            non_zero_indices,
-            flat_image,
-            flat_mask,
-            int(image.shape[0]),
-            int(image.shape[1]),
-            int(image.shape[2]),
-            roots,
-            size=non_zero_size,
-        )
-        _assign_root_sparse(non_zero_indices, flat_mask, roots, size=non_zero_size)
+        while changed[0]:
+            _assign_root_sparse(non_zero_indices, flat_mask, roots, size=non_zero_size)
+            # TODO: flat zones kernel could be launched for the subset of pixels that require it
+            changed[0] = 0
+            _merge_flat_zones_sparse(
+                non_zero_indices,
+                flat_image,
+                flat_mask,
+                int(image.shape[0]),
+                int(image.shape[1]),
+                int(image.shape[2]),
+                roots,
+                changed,
+                size=non_zero_size,
+            )
+            n_iters += 1
 
     else:
         _3d_image_1nn(
@@ -255,18 +261,22 @@ def watershed_from_minima(
             roots,
             size=size,
         )
-        _assign_root(flat_mask, roots, size=size)
+        while changed[0]:
+            _assign_root(flat_mask, roots, size=size)
+            changed[0] = 0
+            _merge_flat_zones(
+                flat_image,
+                flat_mask,
+                int(image.shape[0]),
+                int(image.shape[1]),
+                int(image.shape[2]),
+                roots,
+                changed,
+                size=size,
+            )
+            n_iters += 1
 
-        _merge_flat_zones(
-            flat_image,
-            flat_mask,
-            int(image.shape[0]),
-            int(image.shape[1]),
-            int(image.shape[2]),
-            roots,
-            size=size,
-        )
-        _assign_root(flat_mask, roots, size=size)
+    LOG.info("Performed %d minima merging iterations", n_iters)
 
     _relabel_inplace(flat_mask, roots)
 
