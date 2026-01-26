@@ -25,7 +25,9 @@ __constant__ int dx[] = {
 };
 """
 
-_3d_image_1nn_str = r"""
+
+def _3d_image_1nn_str_func(masked: bool) -> str:
+    return """
     ull z = i / (height * width);
     ull y = (i % (height * width)) / width;
     ull x = i % width;
@@ -34,39 +36,48 @@ _3d_image_1nn_str = r"""
 
     #pragma unroll
     for (int j = 0; j < d_size; ++j)
-    {
+    {{
         ull nz = z + dz[j];
         ull ny = y + dy[j];
         ull nx = x + dx[j];
 
         // zero check is not needed since we are using unsigned integers
         if (nz < depth && ny < height && nx < width)
-        {
+        {{
             ull nidx = IDX(nz, ny, nx, height, width);
-            if (mask[nidx]) {
+            {if_masked} {{
                 ull nval = VAL_IDX(image[nidx], nidx);
-                if (nval < min_value) {
+                if (nval < min_value) {{
                     min_value = nval;
-                }
-            }
-        }
-    }
+                }}
+            }}
+        }}
+    }}
 
     roots[i] = min_value;
-"""
+    """.format(if_masked="if (mask[nidx])" if masked else "")
+
 
 _3d_image_1nn = cp.ElementwiseKernel(
+    r"raw uint16 image, int64 depth, int64 height, int64 width",
+    r"raw uint64 roots",
+    _3d_image_1nn_str_func(masked=False),
+    r"_3d_image_1nn",
+    preamble=preamble,
+)
+
+_3d_image_1nn_masked = cp.ElementwiseKernel(
     r"raw uint16 image, raw bool mask, int64 depth, int64 height, int64 width",
     r"raw uint64 roots",
-    f"if (mask[i]) {{\n{_3d_image_1nn_str}\n}}\n",
-    r"_3d_image_1nn",
+    f"if (mask[i]) {{\n{_3d_image_1nn_str_func(masked=True)}\n}}\n",
+    r"_3d_image_1nn_masked",
     preamble=preamble,
 )
 
 _3d_image_1nn_sparse = cp.ElementwiseKernel(
     r"raw int64 indices, raw uint16 image, raw bool mask, int64 depth, int64 height, int64 width",
     r"raw uint64 roots",
-    f"i = indices[i];\n{_3d_image_1nn_str}\n",
+    f"i = indices[i];\n{_3d_image_1nn_str_func(masked=True)}\n",
     r"_3d_image_1nn_sparse",
     preamble=preamble,
 )
@@ -80,10 +91,18 @@ _assign_root_str = r"""
 """
 
 _assign_root = cp.ElementwiseKernel(
+    r"",
+    r"raw uint64 roots",
+    _assign_root_str,
+    r"_assign_root",
+    preamble=preamble,
+)
+
+_assign_root_masked = cp.ElementwiseKernel(
     r"raw bool mask",
     r"raw uint64 roots",
     f"if (mask[i]) {{\n{_assign_root_str}\n}}\n",
-    r"_assign_root",
+    r"_assign_root_masked",
     preamble=preamble,
 )
 
@@ -95,7 +114,9 @@ _assign_root_sparse = cp.ElementwiseKernel(
     preamble=preamble,
 )
 
-_merge_flat_zones_str = r"""
+
+def _merge_flat_zones_str_func(masked: bool) -> str:
+    return """
     ull r = roots[i];
     ull root_idx = r & IDX_MASK;
     ull i_value = image[i];
@@ -110,43 +131,52 @@ _merge_flat_zones_str = r"""
 
     #pragma unroll
     for (int j = 0; j < d_size; ++j)
-    {
+    {{
         ull nz = z + dz[j];
         ull ny = y + dy[j];
         ull nx = x + dx[j];
 
         if (nz < depth && ny < height && nx < width)
-        {
+        {{
             ull nidx = IDX(nz, ny, nx, height, width);
-            if (mask[nidx]) {
+            {if_masked} {{
                 ull nr = roots[nidx];
-                if (nr < r) { // deeper root
+                if (nr < r) {{ // deeper root
                     r = nr;
-                }
-            }
-        }
-    }
-    if (r != roots[i]) {
-        if (root_idx != i) {
+                }}
+            }}
+        }}
+    }}
+    if (r != roots[i]) {{
+        if (root_idx != i) {{
             roots[i] = r; // using atomicMin only when necessary
-        }
+        }}
         atomicMin(&roots[root_idx], r);
         atomicAdd(&changed[0], 1);
-    }
-"""
+    }}
+""".format(if_masked="if (mask[nidx])" if masked else "")
+
 
 _merge_flat_zones = cp.ElementwiseKernel(
+    r"raw uint16 image, int64 h, int64 depth, int64 height, int64 width",
+    r"raw uint64 roots, raw uint64 changed",
+    _merge_flat_zones_str_func(masked=False),
+    r"_merge_flat_zones",
+    preamble=preamble,
+)
+
+_merge_flat_zones_masked = cp.ElementwiseKernel(
     r"raw uint16 image, raw bool mask, int64 h, int64 depth, int64 height, int64 width",
     r"raw uint64 roots, raw uint64 changed",
-    f"if (mask[i]) {{\n{_merge_flat_zones_str}\n}}\n",
-    r"_merge_flat_zones",
+    f"if (mask[i]) {{\n{_merge_flat_zones_str_func(masked=True)}\n}}\n",
+    r"_merge_flat_zones_masked",
     preamble=preamble,
 )
 
 _merge_flat_zones_sparse = cp.ElementwiseKernel(
     r"raw int64 indices, raw uint16 image, raw bool mask, int64 h, int64 depth, int64 height, int64 width",
     r"raw uint64 roots, raw uint64 changed",
-    f"i = indices[i];\n{_merge_flat_zones_str}\n",
+    f"i = indices[i];\n{_merge_flat_zones_str_func(masked=True)}\n",
     r"_merge_flat_zones_sparse",
     preamble=preamble,
 )
@@ -164,7 +194,7 @@ _relabel_inplace = cp.ElementwiseKernel(
 
 def watershed_from_minima(
     image: cp.ndarray,
-    mask: cp.ndarray,
+    mask: cp.ndarray | None = None,
     h: int = 0,
     sparse: bool = True,
 ) -> cp.ndarray:
@@ -200,9 +230,13 @@ def watershed_from_minima(
 
     if image.ndim == 2:
         image = image[None, ...]
-        mask = mask[None, ...]
+        if mask is not None:
+            mask = mask[None, ...]
 
-    if image.shape != mask.shape:
+    if sparse and mask is None:
+        raise ValueError("'mask' is required for 'sparse' mode")
+
+    if mask is not None and image.shape != mask.shape:
         raise ValueError(f"Image and mask must have the same shape: {image.shape} != {mask.shape}")
 
     if image.dtype != np.uint16:
@@ -214,8 +248,9 @@ def watershed_from_minima(
 
     roots = cp.arange(size, dtype=cp.uint64)
 
-    flat_mask = mask.ravel()
     flat_image = image.ravel()
+    if mask is not None:
+        flat_mask = mask.ravel()
 
     # TODO:
     # - reduce branching of kernels by having different branch for border and non-border pixels
@@ -256,33 +291,60 @@ def watershed_from_minima(
             n_iters += 1
 
     else:
-        _3d_image_1nn(
-            flat_image,
-            flat_mask,
-            int(image.shape[0]),
-            int(image.shape[1]),
-            int(image.shape[2]),
-            roots,
-            size=size,
-        )
-        while changed[0]:
-            _assign_root(flat_mask, roots, size=size)
-            changed[0] = 0
-            _merge_flat_zones(
+        if mask is not None:
+            _3d_image_1nn_masked(
                 flat_image,
                 flat_mask,
-                h,
                 int(image.shape[0]),
                 int(image.shape[1]),
                 int(image.shape[2]),
                 roots,
-                changed,
                 size=size,
             )
+        else:
+            _3d_image_1nn(
+                flat_image,
+                int(image.shape[0]),
+                int(image.shape[1]),
+                int(image.shape[2]),
+                roots,
+                size=size,
+            )
+        while changed[0]:
+            if mask is not None:
+                _assign_root_masked(flat_mask, roots, size=size)
+            else:
+                _assign_root(roots, size=size)
+
+            changed[0] = 0
+            if mask is not None:
+                _merge_flat_zones_masked(
+                    flat_image,
+                    flat_mask,
+                    h,
+                    int(image.shape[0]),
+                    int(image.shape[1]),
+                    int(image.shape[2]),
+                    roots,
+                    changed,
+                    size=size,
+                )
+            else:
+                _merge_flat_zones(
+                    flat_image,
+                    h,
+                    int(image.shape[0]),
+                    int(image.shape[1]),
+                    int(image.shape[2]),
+                    roots,
+                    changed,
+                    size=size,
+                )
             n_iters += 1
 
     LOG.info("Performed %d minima merging iterations", n_iters)
 
-    _relabel_inplace(flat_mask, roots)
+    if mask is not None:
+        _relabel_inplace(flat_mask, roots)
 
     return roots.reshape(orig_shape)
