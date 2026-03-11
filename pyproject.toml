@@ -11,7 +11,7 @@ authors = [
     { name = "Jordao Bragantini", email = "jordao.bragantini@czbiohub.org" }
 ]
 requires-python = ">=3.11"
-dependencies = ["cupy"]
+dependencies = [] # cupy must be installed by the user
 
 [project.optional-dependencies]
 dev = [
@@ -19,6 +19,10 @@ dev = [
     "napari",
     "edt",
 ]
+compiled = ["cupy"]
+cuda13 = ["cupy-cuda13x"]
+cuda12 = ["cupy-cuda12x"]
+cuda11 = ["cupy-cuda11x"]
 
 [tool.hatch.version]
 source = "vcs"
