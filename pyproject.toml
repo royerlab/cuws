@@ -11,7 +11,9 @@ authors = [
     { name = "Jordao Bragantini", email = "jordao.bragantini@czbiohub.org" }
 ]
 requires-python = ">=3.11"
-dependencies = [] # cupy must be installed by the user
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+dependencies = ["cupy"]
 
 [project.optional-dependencies]
 dev = [
