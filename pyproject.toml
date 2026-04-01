@@ -13,7 +13,7 @@ authors = [
 requires-python = ">=3.11"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
-dependencies = ["cupy"]
+dependencies = []
 
 [project.optional-dependencies]
 dev = [
